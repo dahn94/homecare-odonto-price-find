@@ -1,0 +1,22 @@
+[project]
+name = "basis-precificador"
+version = "1.0.0"
+description = "Precificador Odontologia Domiciliar Basis"
+requires-python = ">=3.14"
+dependencies = [
+    "customtkinter>=5.2.0",
+    "Pillow>=10.0.0",
+    "reportlab>=4.0",
+    "thefuzz>=0.20.0",
+]
+
+[project.scripts]
+basis = "main:main"   # opcional: permite rodar com `uv run basis`
+
+[tool.uv]
+# Configurações recomendadas para apps desktop
+dev-dependencies = []
+
+[tool.ruff]
+# (opcional) se você quiser usar ruff no futuro
+line-length = 100
