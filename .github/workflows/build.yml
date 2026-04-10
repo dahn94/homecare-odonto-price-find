@@ -1,0 +1,58 @@
+name: Build AppImage
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y python3 python3-pip python3-tk wget
+          pip3 install pyinstaller customtkinter Pillow reportlab thefuzz
+
+      - name: Build binary
+        run: |
+          pyinstaller --onefile --windowed \
+            --add-data "assets:assets" \
+            --add-data "seeds:seeds" \
+            main.py
+
+      - name: Download AppImageTool
+        run: |
+          wget https://github.com/AppImage/AppImageKit/releases/latest/download/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+      - name: Create AppDir
+        run: |
+          mkdir -p Basis.AppDir/usr/bin
+          cp dist/main Basis.AppDir/usr/bin/basis
+          chmod +x Basis.AppDir/usr/bin/basis
+
+          echo '#!/bin/bash
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/basis"' > Basis.AppDir/AppRun
+          chmod +x Basis.AppDir/AppRun
+
+          cp assets/logo_basis.png Basis.AppDir/basis.png
+
+          echo '[Desktop Entry]
+          Name=Basis Precificador
+          Exec=basis
+          Icon=basis
+          Type=Application
+          Categories=Utility;' > Basis.AppDir/basis.desktop
+
+      - name: Build AppImage
+        run: |
+          ./appimagetool-x86_64.AppImage Basis.AppDir
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppImage
+          path: *.AppImage
