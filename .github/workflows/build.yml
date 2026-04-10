@@ -45,7 +45,12 @@ jobs:
 
       - name: Download AppImageTool
         run: |
-          wget -q https://github.com/AppImage/AppImageKit/releases/latest/download/appimagetool-x86_64.AppImage
+          wget -qO appimagetool-x86_64.AppImage \
+            https://github.com/AppImage/AppImageKit/releases/latest/download/appimagetool-x86_64.AppImage
+          if [ ! -s appimagetool-x86_64.AppImage ]; then
+            echo "AppImageTool download failed or file is empty"
+            exit 1
+          fi
           chmod +x appimagetool-x86_64.AppImage
 
       - name: Create AppDir
