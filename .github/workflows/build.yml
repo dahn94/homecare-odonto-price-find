@@ -1,6 +1,12 @@
 name: Build AppImage
 
-on: [push]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
@@ -9,22 +15,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y python3 python3-pip python3-tk wget
-          pip3 install pyinstaller customtkinter Pillow reportlab thefuzz
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: 'pip'
 
-      - name: Build binary
+      - name: Install system dependencies
         run: |
-          pyinstaller --onefile --windowed \
+          sudo apt-get update
+          sudo apt-get install -y python3.14-tk wget
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install customtkinter Pillow reportlab thefuzz pyinstaller
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile $(find src -name '*.py' | sort)
+
+      - name: Build binary with PyInstaller
+        run: |
+          python -m pyinstaller --onefile --windowed \
             --add-data "assets:assets" \
             --add-data "seeds:seeds" \
             main.py
 
       - name: Download AppImageTool
         run: |
-          wget https://github.com/AppImage/AppImageKit/releases/latest/download/appimagetool-x86_64.AppImage
+          wget -q https://github.com/AppImage/AppImageKit/releases/latest/download/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
 
       - name: Create AppDir
@@ -33,26 +53,31 @@ jobs:
           cp dist/main Basis.AppDir/usr/bin/basis
           chmod +x Basis.AppDir/usr/bin/basis
 
-          echo '#!/bin/bash
+          cat > Basis.AppDir/AppRun <<'EOF'
+          #!/bin/bash
           HERE="$(dirname "$(readlink -f "$0")")"
-          exec "$HERE/usr/bin/basis"' > Basis.AppDir/AppRun
+          exec "$HERE/usr/bin/basis"
+          EOF
           chmod +x Basis.AppDir/AppRun
 
-          cp assets/logo_basis.png Basis.AppDir/basis.png
-
-          echo '[Desktop Entry]
+          cat > Basis.AppDir/basis.desktop <<'EOF'
+          [Desktop Entry]
           Name=Basis Precificador
           Exec=basis
           Icon=basis
           Type=Application
-          Categories=Utility;' > Basis.AppDir/basis.desktop
+          Categories=Utility;
+          EOF
+
+          cp assets/logo_basis.png Basis.AppDir/basis.png
 
       - name: Build AppImage
         run: |
           ./appimagetool-x86_64.AppImage Basis.AppDir
+          if [ -f Basis-x86_64.AppImage ]; then mv Basis-x86_64.AppImage basis-precificador.AppImage; fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AppImage
-          path: *.AppImage
+          name: basis-precificador
+          path: basis-precificador.AppImage
