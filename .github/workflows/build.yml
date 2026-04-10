@@ -83,16 +83,25 @@ jobs:
 
       - name: Build AppImage
         run: |
-          ./appimagetool-x86_64.AppImage Basis.AppDir
-          if [ -f Basis-x86_64.AppImage ]; then mv Basis-x86_64.AppImage basis-precificador.AppImage; fi
+            ./appimagetool-x86_64.AppImage Basis.AppDir
+
+            # pegar o nome gerado automaticamente
+            FILE=$(ls *.AppImage | head -n 1)
+            echo "Generated: $FILE"
+
+            # renomear para padrão fixo
+            mv "$FILE" basis-precificador.AppImage 
+
 
       - name: Publish GitHub Release asset
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: basis-precificador.AppImage
+            name: Basis Precificador ${{ github.ref_name }}
+            tag_name: ${{ github.ref_name }}
+            files: basis-precificador.AppImage
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
