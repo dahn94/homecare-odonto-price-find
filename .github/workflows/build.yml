@@ -28,17 +28,17 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          python3 -m pip install --upgrade pip setuptools wheel
-          python3 -m pip install customtkinter Pillow reportlab thefuzz pyinstaller
-          python3 -m pip show pyinstaller
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install customtkinter Pillow reportlab thefuzz PyInstaller
+          python -m pip show PyInstaller
 
       - name: Validate Python syntax
         run: |
-          python3 -m py_compile $(find src -name '*.py' | sort)
+          python -m py_compile $(find src -name '*.py' | sort)
 
       - name: Build binary with PyInstaller
         run: |
-          python3 -m pyinstaller --onefile --windowed \
+          python -m PyInstaller --onefile --windowed \
             --add-data "assets:assets" \
             --add-data "seeds:seeds" \
             main.py
