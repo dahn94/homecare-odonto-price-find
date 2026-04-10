@@ -24,7 +24,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3.14-tk wget
+          sudo apt-get install -y python3-tk wget
 
       - name: Install Python dependencies
         run: |
