@@ -45,7 +45,9 @@ jobs:
 
       - name: Download AppImageTool
         run: |
-          wget -qO appimagetool-x86_64.AppImage \
+          sudo apt-get update
+          sudo apt-get install -y curl
+          curl -L --fail -o appimagetool-x86_64.AppImage \
             https://github.com/AppImage/AppImageKit/releases/latest/download/appimagetool-x86_64.AppImage
           if [ ! -s appimagetool-x86_64.AppImage ]; then
             echo "AppImageTool download failed or file is empty"
