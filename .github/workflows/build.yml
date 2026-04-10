@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
@@ -83,6 +85,14 @@ jobs:
         run: |
           ./appimagetool-x86_64.AppImage Basis.AppDir
           if [ -f Basis-x86_64.AppImage ]; then mv Basis-x86_64.AppImage basis-precificador.AppImage; fi
+
+      - name: Publish GitHub Release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: basis-precificador.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
