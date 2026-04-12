@@ -9,7 +9,7 @@ from .db.connection import close_connection
 from .models.config import ConfigStore
 from .views.precificador_view import PrecificadorView
 from .views.config_view import ConfigView
-from .export.pdf_generator import gerar_pdf_orcamento
+from .export.pdf_generator import gerar_pdf_orcamento, gerar_pdf_orcamento_interno
 from .models.orcamento import ResultadoPrecificacao
 
 
@@ -50,29 +50,35 @@ class BasisApp(ctk.CTk):
 
     def _export_pdf(
         self, resultado: ResultadoPrecificacao, cliente_nome: str, historico_id: int
-    ):
-        """Gera o PDF e abre automaticamente (Windows/macOS/Linux)"""
+    ) -> tuple[Path, Path]:
+        """Gera 2 PDFs: paciente + log interno e retorna ambos os caminhos."""
         output_dir = Path("orcamentos")
         output_dir.mkdir(exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = "".join(c for c in cliente_nome if c.isalnum() or c in " -_")[:50]
-        output_path = output_dir / f"orcamento_{safe_name}_{timestamp}.pdf"
+        output_cliente = output_dir / f"orcamento_{safe_name}_{timestamp}_cliente.pdf"
+        output_interno = output_dir / f"orcamento_{safe_name}_{timestamp}_interno.pdf"
 
-        pdf_path = gerar_pdf_orcamento(
+        pdf_cliente = gerar_pdf_orcamento(
             resultado=resultado,
             cliente_nome=cliente_nome,
-            output_path=output_path,
+            output_path=output_cliente,
             numero_orcamento=historico_id,
+            cfg=self.cfg,
+        )
+        pdf_interno = gerar_pdf_orcamento_interno(
+            resultado=resultado,
+            cliente_nome=cliente_nome,
+            output_path=output_interno,
+            numero_orcamento=historico_id,
+            cfg=self.cfg,
         )
 
-        print(f"📄 PDF gerado: {pdf_path}")
+        print(f"📄 PDF gerado (cliente): {pdf_cliente}")
+        print(f"📄 PDF gerado (interno): {pdf_interno}")
 
-        # Abre o PDF automaticamente
-        if os.name == "nt":  # Windows
-            os.startfile(pdf_path)
-        elif os.name == "posix":
-            os.system(f'open "{pdf_path}"' if "darwin" in os.uname().sysname.lower() else f'xdg-open "{pdf_path}"')
+        return pdf_cliente, pdf_interno
 
     def destroy(self):
         close_connection()

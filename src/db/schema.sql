@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS config (
 CREATE TABLE IF NOT EXISTS custos_fixos (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   nome          TEXT NOT NULL,
-  valor_mensal  REAL NOT NULL,
+  valor_mensal  TEXT NOT NULL,
   ativo         INTEGER NOT NULL DEFAULT 1
 );
 
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS cbhpo_referencia (
   codigo_cbhpo  TEXT PRIMARY KEY,
   nome_oficial  TEXT NOT NULL,
   categoria     TEXT,
-  valor_oficial REAL NOT NULL,
+  valor_oficial TEXT NOT NULL,
   versao        TEXT NOT NULL,
   fonte         TEXT,
   atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -59,13 +59,13 @@ CREATE TABLE IF NOT EXISTS procedimentos (
   nome                        TEXT NOT NULL,
   categoria                   TEXT NOT NULL,
   codigo_cbhpo                TEXT,
-  valor_atual                 REAL NOT NULL,
+  valor_atual                 TEXT NOT NULL,
   tempo_estimado_min          INTEGER NOT NULL,
-  valor_hora_clinica_override REAL,
-  custo_material              REAL NOT NULL DEFAULT 0,
-  custo_laboratorio           REAL NOT NULL DEFAULT 0,
-  fator_complexidade_min      REAL NOT NULL DEFAULT 1.0,
-  fator_complexidade_max      REAL NOT NULL DEFAULT 1.0,
+  valor_hora_clinica_override TEXT,
+  custo_material              TEXT NOT NULL DEFAULT 0,
+  custo_laboratorio           TEXT NOT NULL DEFAULT 0,
+  fator_complexidade_min      TEXT NOT NULL DEFAULT 1.0,
+  fator_complexidade_max      TEXT NOT NULL DEFAULT 1.0,
   ativo                       INTEGER NOT NULL DEFAULT 1,
   FOREIGN KEY (codigo_cbhpo) REFERENCES cbhpo_referencia(codigo_cbhpo)
 );
@@ -100,11 +100,11 @@ CREATE TABLE IF NOT EXISTS historico (
   distancia_km        REAL NOT NULL,
   is_nee              INTEGER NOT NULL DEFAULT 0,
   regime_aplicado     TEXT NOT NULL,
-  aliquota_aplicada   REAL NOT NULL,
-  total_a_vista       REAL NOT NULL,
-  total_cartao_7x     REAL NOT NULL,
-  total_cartao_10x    REAL NOT NULL,
-  total_cartao_12x    REAL NOT NULL,
+  aliquota_aplicada   TEXT NOT NULL,
+  total_a_vista       TEXT NOT NULL,
+  total_cartao_7x     TEXT NOT NULL,
+  total_cartao_10x    TEXT NOT NULL,
+  total_cartao_12x    TEXT NOT NULL,
   pdf_gerado          INTEGER NOT NULL DEFAULT 0,
   payload_json        TEXT NOT NULL
 );

@@ -4,7 +4,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-_DB_PATH = Path(__file__).resolve().parents[2] / "basis.db"
+from ..paths import get_data_dir
+
+_DB_PATH = get_data_dir() / "basis.db"
 _conn: sqlite3.Connection | None = None
 
 

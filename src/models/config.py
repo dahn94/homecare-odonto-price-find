@@ -1,6 +1,7 @@
 """Acesso tipado à tabela config (chave/valor)."""
 from __future__ import annotations
 import json
+from decimal import Decimal
 from typing import Any
 from ..db.connection import get_connection
 
@@ -25,7 +26,7 @@ class ConfigStore:
     @staticmethod
     def _coerce(valor: str, tipo: str) -> Any:
         if tipo == "float":
-            return float(valor)
+            return Decimal(valor)
         if tipo == "int":
             return int(valor)
         if tipo == "bool":

@@ -12,6 +12,9 @@ INSERT OR IGNORE INTO config (chave, valor, tipo, grupo, descricao) VALUES
 
   -- Deslocamento
   ('deslocamento.margem_lucro',        '0.30',  'float', 'deslocamento','Margem aplicada ao custo real do deslocamento'),
+  ('deslocamento.velocidade_media_km_h_estrada_terra', '20', 'int',   'deslocamento','Velocidade média em estrada de terra (km/h) — mais baixa = mais tempo/custo'),
+  ('deslocamento.fator_manutencao_estrada_terra', '1.50', 'float', 'deslocamento','Multiplicador da manutenção R$/km no trecho de terra (desgaste)'),
+  ('deslocamento.acrescimo_bairro_nobre_percent', '0.05', 'float', 'deslocamento','Acréscimo sobre a taxa de deslocamento se bairro nobre (ex: 0.05 = +5%)'),
 
   -- Maquineta
   ('maquineta.nome',                   'modoPAG','string','maquineta',  'Nome da maquineta usada'),
@@ -26,9 +29,15 @@ INSERT OR IGNORE INTO config (chave, valor, tipo, grupo, descricao) VALUES
   ('impostos.aliquota_mei',            '0.06',  'float', 'impostos',    'Alíquota efetiva MEI'),
   ('impostos.aliquota_simples',        '0.135', 'float', 'impostos',    'Alíquota efetiva Simples Nacional (Anexo III)'),
 
+  -- Estacionamento (quando marcado como pago no orçamento: tempo dos procedimentos × tarifa)
+  ('estacionamento.tarifa_hora_padrao', '8.00', 'float', 'estacionamento', 'Tarifa de estacionamento (R$/h) — valor estimado = (minutos dos procedimentos ÷ 60) × tarifa'),
+
   -- Domiciliar
   ('domiciliar.acrescimo_padrao',      '1.00',  'float', 'domiciliar',  'Acréscimo domiciliar (100% sobre o valor de consultório)'),
   ('domiciliar.acrescimo_nee',         '0.25',  'float', 'domiciliar',  'Acréscimo NEE (25% adicional)'),
+
+  -- Orçamento
+  ('orcamento.validade_dias',          '30',    'int',   'orcamento',   'Validade das cotações geradas em dias'),
 
   -- Retrabalho
   ('retrabalho.margem_percent',        '0.05',  'float', 'retrabalho',  'Margem de retrabalho (5%)'),

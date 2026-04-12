@@ -31,15 +31,30 @@ FONTS = {
 }
 
 
-def fmt_brl(valor: float) -> str:
+from decimal import Decimal
+
+
+def _to_decimal(value: Decimal | float | int | str) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def fmt_brl(valor: Decimal | float | int | str) -> str:
     """Formata valor em R$ no padrão brasileiro."""
     try:
-        s = f"{valor:,.2f}"
+        d = _to_decimal(valor).quantize(Decimal("0.01"))
+        s = f"{d:,.2f}"
         s = s.replace(",", "X").replace(".", ",").replace("X", ".")
         return f"R$ {s}"
     except Exception:
         return "R$ 0,00"
 
 
-def fmt_pct(valor: float) -> str:
-    return f"{valor * 100:.2f}%".replace(".", ",")
+def fmt_pct(valor: Decimal | float | int | str) -> str:
+    try:
+        d = _to_decimal(valor) * Decimal("100")
+        s = f"{d:.2f}"
+        return s.replace(".", ",") + "%"
+    except Exception:
+        return "0,00%"

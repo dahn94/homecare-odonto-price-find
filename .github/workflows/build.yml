@@ -43,6 +43,8 @@ jobs:
           python -m PyInstaller --onefile --windowed \
             --add-data "assets:assets" \
             --add-data "seeds:seeds" \
+            --add-data "src/db/schema.sql:src/db" \
+            --add-data "pyproject.toml:." \
             main.py
 
       - name: Download AppImageTool

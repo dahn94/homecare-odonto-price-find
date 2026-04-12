@@ -1,8 +1,10 @@
 """Tela de Configurações — Versão Melhorada (foco em impostos intuitivos)"""
 from __future__ import annotations
+from decimal import Decimal
 import customtkinter as ctk
 from ..models.config import ConfigStore
 from ..db.repositories import ProcedimentoRepo, CustosFixosRepo
+from ..calc import deslocamento as calc_deslocamento
 from ..theme import COLORS, FONTS, fmt_brl, fmt_pct
 from ..models.procedimento import Procedimento
 
@@ -44,7 +46,7 @@ class ConfigView(ctk.CTkToplevel):
         tabview = ctk.CTkTabview(self, fg_color=COLORS["bg_primary"])
         tabview.pack(fill="both", expand=True, padx=20, pady=20)
 
-        self._create_tab(tabview.add("Geral"), ["veiculo", "tempo", "deslocamento", "domiciliar"])
+        self._create_tab(tabview.add("Geral"), ["veiculo", "tempo", "deslocamento", "domiciliar", "estacionamento", "orcamento"])
         self._create_tab(tabview.add("Maquineta"), ["maquineta"])
         self._create_impostos_tab(tabview.add("Impostos"))          # ← NOVA ABA MAIS CLARA
         self._create_custos_meta_tab(tabview.add("Custos & Meta"))
@@ -80,9 +82,10 @@ class ConfigView(ctk.CTkToplevel):
 
             def save(k=chave, v=var):
                 try:
-                    pct = float(v.get().replace(",", ".").replace("%", "")) / 100
+                    raw = v.get().replace(",", ".").replace("%", "").strip()
+                    pct = Decimal(raw) / Decimal("100")
                     self.cfg.set(k, pct)
-                except:
+                except Exception:
                     pass
 
             entry.bind("<FocusOut>", lambda e, s=save: s())
@@ -91,15 +94,13 @@ class ConfigView(ctk.CTkToplevel):
             btn = ctk.CTkLabel(row, text="❔", font=("Segoe UI", 14), text_color=COLORS["text_muted"])
             btn.pack(side="left", padx=12)
             Tooltip(btn, descricao)
-
-        # Regime padrão (qual será usado automaticamente)
-        ctk.CTkLabel(scroll, text="Regime Padrão (usado automaticamente)", 
-                     font=FONTS["heading"], text_color=COLORS["accent"]).pack(anchor="w", pady=(30, 8))
-
-        default_var = ctk.StringVar(value=self.cfg.get("impostos.regime_default", "PF"))
-        ctk.CTkOptionMenu(scroll, values=["PF", "MEI", "SIMPLES", "DEFAULT"],
-                          variable=default_var,
-                          command=lambda v: self.cfg.set("impostos.regime_default", v)).pack(anchor="w", padx=20)
+        
+        ctk.CTkLabel(
+            scroll,
+            text="O regime é selecionado na tela principal a cada orçamento.",
+            font=FONTS["small"],
+            text_color=COLORS["text_muted"],
+        ).pack(anchor="w", pady=(18, 0))
 
     # ==================== Helpers de UI ====================
     @staticmethod
@@ -114,20 +115,22 @@ class ConfigView(ctk.CTkToplevel):
         return any(n in chave for n in needles)
 
     @staticmethod
-    def _parse_floatish(text: str) -> float:
+    def _parse_decimalish(text: str) -> Decimal:
         t = (text or "").strip().replace("R$", "").replace(" ", "")
+        if not t:
+            return Decimal("0")
         # aceita "1.234,56" ou "1234,56" ou "1234.56"
         if "," in t and "." in t:
             t = t.replace(".", "").replace(",", ".")
         else:
             t = t.replace(",", ".")
-        return float(t)
+        return Decimal(t)
 
     def _format_value(self, chave: str, tipo: str, value):
         if tipo == "bool":
             return bool(value)
         if tipo in ("int", "float"):
-            v = float(value)
+            v = Decimal(str(value))
             if self._is_percent_key(chave):
                 return fmt_pct(v)
             if "hora_clinica" in chave or "preco" in chave or "valor" in chave or "faturamento" in chave:
@@ -141,15 +144,15 @@ class ConfigView(ctk.CTkToplevel):
         raw = (var.get() or "").strip()
         try:
             if tipo == "int":
-                v = int(self._parse_floatish(raw))
+                v = int(self._parse_decimalish(raw))
             elif tipo == "float":
-                v = self._parse_floatish(raw)
+                v = self._parse_decimalish(raw)
                 if self._is_percent_key(chave):
                     # heurística: se digitou "30" ou "30%" vira 0.30
                     if "%" in raw:
-                        v = v / 100.0
-                    elif v > 1.0:
-                        v = v / 100.0
+                        v = v / Decimal("100")
+                    elif v > Decimal("1"):
+                        v = v / Decimal("100")
             elif tipo == "bool":
                 return
             else:
@@ -237,6 +240,11 @@ class ConfigView(ctk.CTkToplevel):
 
             ctk.CTkFrame(scroll, fg_color="transparent", height=10).pack(fill="x")
 
+            # Simulador rápido (ajuda a usuária a "ver" o cálculo do deslocamento)
+            if grupo == "deslocamento":
+                self._render_deslocamento_simulator(scroll)
+                ctk.CTkFrame(scroll, fg_color="transparent", height=10).pack(fill="x")
+
         if not any_rendered:
             ctk.CTkLabel(
                 scroll,
@@ -244,6 +252,95 @@ class ConfigView(ctk.CTkToplevel):
                 font=FONTS["body"],
                 text_color=COLORS["text_muted"],
             ).pack(anchor="w", pady=10)
+
+    def _render_deslocamento_simulator(self, parent) -> None:
+        card = ctk.CTkFrame(parent, fg_color=COLORS["bg_secondary"], corner_radius=12)
+        card.pack(fill="x", padx=4, pady=(6, 12))
+
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=16, pady=14)
+
+        ctk.CTkLabel(
+            inner,
+            text="Simulador de deslocamento (asfalto + terra + bairro nobre)",
+            font=FONTS["heading"],
+            text_color=COLORS["accent"],
+        ).pack(anchor="w")
+
+        row = ctk.CTkFrame(inner, fg_color="transparent")
+        row.pack(fill="x", pady=(10, 8))
+
+        km_asf_var = ctk.StringVar(value="8")
+        km_ter_var = ctk.StringVar(value="2")
+        nobre_var = ctk.BooleanVar(value=False)
+
+        ctk.CTkLabel(row, text="Asfalto", font=FONTS["small"], text_color=COLORS["text_secondary"]).pack(side="left")
+        ctk.CTkEntry(
+            row, textvariable=km_asf_var, width=72, font=FONTS["mono"],
+            fg_color=COLORS["input_bg"], border_color=COLORS["gold"], border_width=2,
+        ).pack(side="left", padx=(6, 14))
+        ctk.CTkLabel(row, text="Terra", font=FONTS["small"], text_color=COLORS["text_secondary"]).pack(side="left")
+        ctk.CTkEntry(
+            row, textvariable=km_ter_var, width=72, font=FONTS["mono"],
+            fg_color=COLORS["input_bg"], border_color=COLORS["gold"], border_width=2,
+        ).pack(side="left", padx=6)
+        ctk.CTkCheckBox(
+            row, text="Nobre", variable=nobre_var, font=FONTS["small"],
+            text_color=COLORS["text_secondary"], fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+        ).pack(side="left", padx=(12, 0))
+
+        out = ctk.CTkFrame(inner, fg_color=COLORS["bg_card"], corner_radius=10)
+        out.pack(fill="x", pady=(6, 0))
+
+        lines = {
+            "seg": ctk.CTkLabel(out, text="", font=FONTS["small"], text_color=COLORS["text_secondary"], anchor="w"),
+            "comb": ctk.CTkLabel(out, text="", font=FONTS["small"], text_color=COLORS["text_secondary"], anchor="w"),
+            "manu": ctk.CTkLabel(out, text="", font=FONTS["small"], text_color=COLORS["text_secondary"], anchor="w"),
+            "tempo": ctk.CTkLabel(out, text="", font=FONTS["small"], text_color=COLORS["text_secondary"], anchor="w"),
+            "real": ctk.CTkLabel(out, text="", font=FONTS["body_bold"], text_color=COLORS["text_primary"], anchor="w"),
+            "taxa": ctk.CTkLabel(out, text="", font=FONTS["body_bold"], text_color=COLORS["success"], anchor="w"),
+        }
+        for k in ["seg", "comb", "manu", "tempo", "real", "taxa"]:
+            lines[k].pack(fill="x", padx=14, pady=(8 if k == "seg" else 2, 2))
+        ctk.CTkFrame(out, fg_color="transparent", height=6).pack()
+
+        def recalc():
+            try:
+                ka = float(Decimal(km_asf_var.get().replace(",", ".") or "0"))
+                kt = float(Decimal(km_ter_var.get().replace(",", ".") or "0"))
+                d = calc_deslocamento.calcular_composto(ka, kt, nobre_var.get(), None, self.cfg)
+                lines["seg"].configure(
+                    text=f"Trechos: {ka:.1f} km asfalto + {kt:.1f} km terra = {d.distancia_km:.1f} km total (ida+volta)"
+                )
+                lines["comb"].configure(
+                    text=f"Combustível: {fmt_brl(d.custo_combustivel_total)} ({fmt_brl(d.custo_combustivel_km)}/km)"
+                )
+                lines["manu"].configure(text=f"Manutenção (soma trechos): {fmt_brl(d.custo_manutencao_total)}")
+                lines["tempo"].configure(text=f"Tempo/trânsito (soma): {fmt_brl(d.custo_tempo)}")
+                lines["real"].configure(
+                    text=f"Custo real: {fmt_brl(d.custo_real)} (asfalto {fmt_brl(d.custo_real_asfalto)} + terra {fmt_brl(d.custo_real_terra)})"
+                )
+                nb = f" + nobre {fmt_pct(d.acrescimo_bairro_nobre_percent)}" if d.bairro_nobre and d.acrescimo_bairro_nobre_percent > 0 else ""
+                lines["taxa"].configure(
+                    text=f"Taxa ao paciente: {fmt_brl(d.taxa_ao_paciente)} (margem {fmt_pct(d.margem_lucro)}{nb})"
+                )
+            except Exception:
+                return
+
+        ctk.CTkButton(
+            row,
+            text="Calcular",
+            font=FONTS["body_bold"],
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            text_color=COLORS["bg_primary"],
+            height=36,
+            width=120,
+            corner_radius=10,
+            command=recalc,
+        ).pack(side="right")
+
+        recalc()
 
     # ==================== Custos fixos + meta ====================
     def _create_custos_meta_tab(self, tab):
@@ -271,7 +368,7 @@ class ConfigView(ctk.CTkToplevel):
                 text_color=COLORS["text_primary"],
             ).pack(side="left", padx=16, pady=10)
 
-            var = ctk.StringVar(value=fmt_brl(float(item["valor_mensal"])))
+            var = ctk.StringVar(value=fmt_brl(item["valor_mensal"]))
             entry = ctk.CTkEntry(
                 row,
                 textvariable=var,
@@ -285,9 +382,9 @@ class ConfigView(ctk.CTkToplevel):
 
             def save_cost(i=item["id"], v=var):
                 try:
-                    val = self._parse_floatish(v.get())
-                    CustosFixosRepo.atualizar(i, float(val))
-                    v.set(fmt_brl(float(val)))
+                    val = self._parse_decimalish(v.get())
+                    CustosFixosRepo.atualizar(i, val)
+                    v.set(fmt_brl(val))
                 except Exception:
                     return
 
@@ -427,9 +524,9 @@ class ConfigView(ctk.CTkToplevel):
 
         def save_val():
             try:
-                val = self._parse_floatish(var.get())
-                ProcedimentoRepo.atualizar_valor(proc.id, float(val))
-                var.set(fmt_brl(float(val)))
+                val = self._parse_decimalish(var.get())
+                ProcedimentoRepo.atualizar_valor(proc.id, val)
+                var.set(fmt_brl(val))
             except Exception:
                 return
 
