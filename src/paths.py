@@ -19,9 +19,11 @@ def get_bundle_dir() -> Path:
 def get_data_dir() -> Path:
     """Diretório gravável para dados do usuário (basis.db, PDFs).
 
-    Quando empacotado, usa o diretório onde o executável está.
+    Quando empacotado, usa ~/.basis-precificador (garante escrita em qualquer plataforma).
     Em desenvolvimento, usa a raiz do projeto.
     """
     if _is_bundled():
-        return Path(sys.executable).resolve().parent
+        data = Path.home() / ".basis-precificador"
+        data.mkdir(parents=True, exist_ok=True)
+        return data
     return Path(__file__).resolve().parents[1]
