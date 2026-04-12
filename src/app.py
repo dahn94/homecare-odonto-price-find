@@ -18,7 +18,7 @@ class BasisApp(ctk.CTk):
         super().__init__()
         self.title("Basis Precificador • Odontologia Domiciliar")
         self.geometry("1280x720")
-        self.minsize(1100, 680)
+        self.minsize(800, 500)
 
         self.cfg = ConfigStore()
 

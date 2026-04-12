@@ -102,7 +102,7 @@ class PrecificadorView(ctk.CTkFrame):
         panel = ctk.CTkFrame(parent, fg_color=COLORS["bg_secondary"], corner_radius=12)
         panel.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
 
-        inner = ctk.CTkFrame(panel, fg_color="transparent")
+        inner = ctk.CTkScrollableFrame(panel, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=20, pady=20)
 
         ctk.CTkLabel(
@@ -351,7 +351,7 @@ class PrecificadorView(ctk.CTkFrame):
         self.result_panel = ctk.CTkFrame(parent, fg_color=COLORS["bg_secondary"], corner_radius=12)
         self.result_panel.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
 
-        self.result_inner = ctk.CTkFrame(self.result_panel, fg_color="transparent")
+        self.result_inner = ctk.CTkScrollableFrame(self.result_panel, fg_color="transparent")
         self.result_inner.pack(fill="both", expand=True, padx=24, pady=24)
 
         self.pdf_list_items = ctk.CTkFrame(self.result_inner, fg_color="transparent")
