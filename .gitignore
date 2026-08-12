@@ -11,3 +11,6 @@ wheels/
 
 # SQLite database
 basis.db
+
+# orcamentos
+orcamentos

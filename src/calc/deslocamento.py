@@ -36,6 +36,12 @@ class CustoDeslocamento:
     # Auditoria por trecho
     custo_real_asfalto: Decimal = Decimal("0.00")
     custo_real_terra: Decimal = Decimal("0.00")
+    custo_combustivel_asfalto: Decimal = Decimal("0.00")
+    custo_combustivel_terra: Decimal = Decimal("0.00")
+    custo_manutencao_asfalto: Decimal = Decimal("0.00")
+    custo_manutencao_terra: Decimal = Decimal("0.00")
+    custo_tempo_asfalto: Decimal = Decimal("0.00")
+    custo_tempo_terra: Decimal = Decimal("0.00")
 
 
 def _to_decimal(value: Decimal | float | int | str) -> Decimal:
@@ -103,10 +109,7 @@ def calcular_composto(
 
     comb_t = ca[0] + ct[0]
     manut_t = ca[1] + ct[1]
-    veic_t = ca[2] + ct[2]
-    real_a = ca[4]
-    real_t = ct[4]
-    custo_real_veiculo = real_a + real_t
+    veic_t = ca[2] + ct[2]  # só combustível + manutenção (sem tempo)
 
     if tempo_waze_min is not None:
         tempo_waze_min = max(Decimal("0"), _to_decimal(tempo_waze_min))
@@ -118,7 +121,19 @@ def calcular_composto(
     else:
         tempo_t = ca[3] + ct[3]
 
-    custo_real = custo_real_veiculo + tempo_t
+    # custo_real por trecho (veículo + tempo proporcional à distância do trecho)
+    dist_total = km_asfalto + km_terra
+    if tempo_waze_min is None:
+        tempo_a, tempo_t_trecho = ca[3], ct[3]
+    elif dist_total > 0:
+        tempo_a = tempo_t * km_asfalto / dist_total
+        tempo_t_trecho = tempo_t * km_terra / dist_total
+    else:
+        tempo_a = tempo_t_trecho = Decimal("0")
+    real_a = ca[2] + tempo_a
+    real_t = ct[2] + tempo_t_trecho
+
+    custo_real = veic_t + tempo_t
 
     taxa_sem_nobre = custo_real * (Decimal("1") + margem)
     taxa = taxa_sem_nobre
@@ -148,6 +163,12 @@ def calcular_composto(
         taxa_ao_paciente=taxa,
         custo_real_asfalto=real_a,
         custo_real_terra=real_t,
+        custo_combustivel_asfalto=ca[0],
+        custo_combustivel_terra=ct[0],
+        custo_manutencao_asfalto=ca[1],
+        custo_manutencao_terra=ct[1],
+        custo_tempo_asfalto=tempo_a,
+        custo_tempo_terra=tempo_t_trecho,
     )
 
 

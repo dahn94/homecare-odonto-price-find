@@ -78,10 +78,17 @@ def _fmt_brl(v: Decimal | float | int | str) -> str:
     return f"R$ {s}"
 
 
-def _fmt_brl_preciso(v: Decimal | float | int | str) -> str:
-    d = Decimal(str(v)).normalize()
-    s = format(d, "f").replace(".", ",")
+def _fmt_brl_4(v: Decimal | float | int | str) -> str:
+    """Formato monetário com 4 casas decimais (padrão bancário — cálculos intermediários)."""
+    d = Decimal(str(v)).quantize(Decimal("0.0001"))
+    s = f"{d:,.4f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"R$ {s}"
+
+
+def _fmt_pct(v: Decimal | float | int | str) -> str:
+    d = Decimal(str(v)) * 100
+    s = f"{d:.2f}".replace(".", ",")
+    return f"{s}%"
 
 
 def gerar_pdf_orcamento(
@@ -308,9 +315,14 @@ def gerar_pdf_orcamento_interno(
     numero_orcamento: int | None = None,
     cfg: ConfigStore | None = None,
 ) -> Path:
-    """PDF interno (dentista): decomposição completa e auditoria de deslocamento.
+    """PDF interno (dentista): formação do preço + resultado líquido.
 
-    Este PDF não é pensado para o paciente — é um log técnico do cálculo.
+    Estrutura:
+    1. Resumo (inputs)
+    2. Formação do preço (cascata — cada componente somando ao acumulado)
+    3. Resultado líquido (o que sobra pro profissional)
+    4. Cenários de pagamento
+    5. Deslocamento (detalhe técnico)
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -342,153 +354,308 @@ def gerar_pdf_orcamento_interno(
     section = ParagraphStyle(
         "section", parent=styles["Heading2"],
         fontName="Helvetica-Bold", fontSize=12,
-        textColor=ACCENT, spaceBefore=10, spaceAfter=6,
+        textColor=ACCENT, spaceBefore=12, spaceAfter=6,
     )
     mono = ParagraphStyle(
         "mono", parent=styles["Normal"],
         fontName="Courier", fontSize=9,
-        textColor=colors.black, leading=11,
+        textColor=colors.black, leading=12,
     )
 
     hoje = datetime.now()
-    numero_str = f"#{numero_orcamento:05d}" if numero_orcamento else "—"
-
-    story.append(Paragraph("Log interno de precificação", h1))
-    story.append(Paragraph(f"{numero_str} · {hoje.strftime('%d/%m/%Y %H:%M')}", sub))
-    story.append(Paragraph(f"<b>Cliente:</b> {cliente_nome}", mono))
+    numero_str = f"#{numero_orcamento:05d}" if numero_orcamento else ""
     ent = resultado.entrada
-    story.append(Paragraph(
-        f"<b>Asfalto (ida+volta):</b> {ent.km_asfalto:.2f} km · <b>Terra (ida+volta):</b> {ent.km_terra:.2f} km · "
-        f"<b>Total:</b> {ent.distancia_km:.2f} km",
-        mono,
-    ))
-    story.append(Paragraph(f"<b>Bairro nobre:</b> {'sim' if ent.bairro_nobre else 'não'}", mono))
-    est_txt = (
-        "gratuito"
-        if getattr(ent, "estacionamento_gratuito", True)
-        else f"pago — {resultado.tempo_procedimentos_min:.0f} min × tarifa (≈ {_fmt_brl(resultado.custo_estacionamento)})"
-    )
-    story.append(Paragraph(f"<b>Estacionamento:</b> {est_txt}", mono))
-    story.append(Paragraph(f"<b>NEE:</b> {'sim' if resultado.entrada.is_nee else 'não'}", mono))
-    story.append(Paragraph(
-        f"<b>Regime aplicado:</b> {resultado.regime_aplicado.value} · <b>Alíquota:</b> {(resultado.aliquota_aplicada * 100):.2f}%".replace(".", ","),
-        mono,
-    ))
-    story.append(Spacer(1, 8))
 
-    # Procedimentos (com valores atuais)
-    story.append(Paragraph("Procedimentos (inputs)", section))
-    procs_map = ProcedimentoRepo.por_ids([pid for pid, _ in resultado.entrada.procedimentos])
-    proc_rows = [["ID", "Procedimento", "Qtd.", "Valor atual (R$)", "Tempo (min)", "Mat.", "Lab", "Hora override"]]
-    for pid, qtd in resultado.entrada.procedimentos:
-        p = procs_map.get(pid)
-        if not p:
-            proc_rows.append([str(pid), f"Procedimento #{pid}", str(qtd), "—", "—", "—", "—", "—"])
-            continue
-        proc_rows.append([
-            str(p.id),
-            p.nome,
-            str(qtd),
-            _fmt_brl(p.valor_atual),
-            str(int(p.tempo_estimado_min)),
-            _fmt_brl(p.custo_material),
-            _fmt_brl(p.custo_laboratorio),
-            _fmt_brl(p.valor_hora_clinica_override) if p.valor_hora_clinica_override else "global",
-        ])
-
-    tbl = Table(proc_rows, colWidths=[1.0 * cm, 7.2 * cm, 1.3 * cm, 2.6 * cm, 1.7 * cm, 1.7 * cm, 1.7 * cm, 2.1 * cm])
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), BG_DARK),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 8),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D9E2EF")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FB")]),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    story.append(tbl)
-
-    # Deslocamento detalhado
-    story.append(Paragraph("Deslocamento (auditoria)", section))
+    # Recalcular deslocamento para ter os custos reais
+    d = None
     if cfg is not None:
         d = calc_deslocamento.calcular_composto(
-            resultado.entrada.km_asfalto,
-            resultado.entrada.km_terra,
-            resultado.entrada.bairro_nobre,
-            resultado.entrada.tempo_waze_min,
-            cfg,
+            ent.km_asfalto, ent.km_terra, ent.bairro_nobre,
+            ent.tempo_waze_min, cfg,
         )
-        rows = [
-            ["Item", "Detalhe", "Valor"],
-            ["Combustível (R$/km)", "preço/L ÷ km/L", _fmt_brl_preciso(d.custo_combustivel_km)],
-            ["Manutenção base (R$/km)", "config veículo", _fmt_brl_preciso(d.custo_manutencao_km_base)],
-            ["Tempo asfalto (R$/km)", "hora ÷ vel asfalto", _fmt_brl_preciso(d.custo_tempo_km_asfalto)],
-            ["Tempo terra (R$/km)", "hora ÷ vel terra", _fmt_brl_preciso(d.custo_tempo_km_terra)],
-            [
-                "Tempo Waze (min)",
-                "input (opcional)",
-                f"{d.tempo_waze_min:.0f}".replace(".", ",") if d.tempo_waze_min is not None else "—",
-            ],
-            ["Km asfalto", "input", f"{d.km_asfalto:.6f}".replace(".", ",")],
-            ["Km terra", "input", f"{d.km_terra:.6f}".replace(".", ",")],
-            ["Custo real — asfalto", "trecho", _fmt_brl_preciso(d.custo_real_asfalto)],
-            ["Custo real — terra", "trecho (manut. × fator)", _fmt_brl_preciso(d.custo_real_terra)],
-            ["Combustível total", "soma trechos", _fmt_brl_preciso(d.custo_combustivel_total)],
-            ["Manutenção total", "soma trechos", _fmt_brl_preciso(d.custo_manutencao_total)],
-            ["Veículo total", "comb+manut", _fmt_brl_preciso(d.custo_veiculo)],
-            ["Tempo total", "soma trechos / Waze", _fmt_brl_preciso(d.custo_tempo)],
-            ["Custo real", "veículo + tempo", _fmt_brl_preciso(d.custo_real)],
-            ["Margem deslocamento", "config", f"{(d.margem_lucro * 100):.4f}%".replace(".", ",")],
-            ["Taxa após margem", "custo_real × (1+margem)", _fmt_brl_preciso(d.taxa_apos_margem_sem_nobre)],
-            ["Bairro nobre", "acréscimo config" if d.bairro_nobre else "—", f"{(d.acrescimo_bairro_nobre_percent * 100):.4f}%".replace(".", ",") if d.bairro_nobre else "—"],
-            ["Taxa ao paciente (final)", "após margem (+ nobre se aplicável)", _fmt_brl_preciso(d.taxa_ao_paciente)],
-        ]
-        dt = Table(rows, colWidths=[5.3 * cm, 7.2 * cm, 4.0 * cm])
-        dt.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), BG_DARK),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 9),
-            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ("ALIGN", (-1, 0), (-1, -1), "RIGHT"),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FB")]),
-            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D9E2EF")),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ]))
-        story.append(dt)
-        story.append(Spacer(1, 6))
-    else:
-        story.append(Paragraph(
-            f"Total cobrado de deslocamento (com margem): <b>{_fmt_brl_preciso(resultado.custo_deslocamento)}</b>",
-            mono,
-        ))
 
-    # Resumo da decomposição
-    story.append(Paragraph("Decomposição (totais)", section))
-    decomp = [
-        ["Componente", "Valor"],
-        ["Procedimentos (com acréscimo domiciliar/NEE)", _fmt_brl_preciso(resultado.custo_procedimentos)],
-        ["Hora clínica", _fmt_brl_preciso(resultado.custo_hora_clinica)],
-        ["Materiais + laboratório", _fmt_brl_preciso(resultado.custo_materiais_lab)],
-        ["Deslocamento (taxa ao paciente)", _fmt_brl_preciso(resultado.custo_deslocamento)],
-        ["Estacionamento (tempo proced. × R$/h)", _fmt_brl_preciso(resultado.custo_estacionamento)],
-        ["Custos fixos rateados", _fmt_brl_preciso(resultado.custo_fixos_rateado)],
-        ["Margem retrabalho", _fmt_brl_preciso(resultado.margem_retrabalho)],
-        ["Impostos (fórmula inversa)", _fmt_brl_preciso(resultado.valor_impostos)],
-        ["Subtotal à vista (base p/ maquineta)", _fmt_brl_preciso(resultado.subtotal_a_vista)],
+    # Carregar dados dos procedimentos
+    procs_map = ProcedimentoRepo.por_ids([pid for pid, _ in ent.procedimentos])
+    acrescimo_dom = Decimal(str(cfg.get("domiciliar.acrescimo_padrao"))) if cfg else Decimal("0")
+    acrescimo_nee = Decimal(str(cfg.get("domiciliar.acrescimo_nee"))) if cfg else Decimal("0")
+    valor_hora_global = Decimal(str(cfg.get("tempo.valor_hora_clinica"))) if cfg else Decimal("150")
+
+    # ─────────── 1. RESUMO ───────────
+    story.append(Paragraph("Log interno de precificação", h1))
+    story.append(Paragraph(f"{numero_str} · {hoje.strftime('%d/%m/%Y %H:%M')}", sub))
+
+    # Info compacta
+    flags = []
+    if ent.is_nee:
+        flags.append("NEE")
+    if ent.bairro_nobre:
+        flags.append("bairro nobre")
+    if not getattr(ent, "estacionamento_gratuito", True):
+        flags.append(f"estac. pago ({_fmt_brl(resultado.custo_estacionamento)})")
+    flags_txt = f" · {', '.join(flags)}" if flags else ""
+
+    regime_nomes = {"PF": "PF (carnê-leão)", "MEI": "MEI", "SIMPLES": "Simples Nacional", "DEFAULT": "sem impostos"}
+    regime_txt = regime_nomes.get(resultado.regime_aplicado.value, resultado.regime_aplicado.value)
+
+    story.append(Paragraph(
+        f"<b>Cliente:</b> {cliente_nome} · "
+        f"<b>Deslocamento:</b> {ent.km_asfalto:.0f}km asf + {ent.km_terra:.0f}km terra = {ent.distancia_km:.0f}km"
+        f"{flags_txt}",
+        mono,
+    ))
+    story.append(Paragraph(
+        f"<b>Regime:</b> {regime_txt} ({_fmt_pct(resultado.aliquota_aplicada)}) · "
+        f"<b>Acréscimo domiciliar:</b> {_fmt_pct(acrescimo_dom)}"
+        + (f" · <b>NEE:</b> +{_fmt_pct(acrescimo_nee)}" if ent.is_nee else ""),
+        mono,
+    ))
+    story.append(Spacer(1, 6))
+
+    # ─────────── 2. FORMAÇÃO DO PREÇO (cascata) ───────────
+    story.append(Paragraph("Formação do preço", section))
+
+    # Estilos para células com wrap
+    cell_normal = ParagraphStyle("cell_normal", fontName="Helvetica", fontSize=8, leading=10, textColor=colors.black)
+    cell_bold = ParagraphStyle("cell_bold", fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=colors.black)
+    cell_calc = ParagraphStyle("cell_calc", fontName="Helvetica", fontSize=7.5, leading=9, textColor=TEXT_MUTED)
+
+    cascade_rows = [["Etapa", "Cálculo", "Valor", "Acumulado"]]
+    acumulado = Decimal("0")
+
+    # 2a. Procedimentos (um por um, com acréscimo domiciliar visível)
+    for pid, qtd in ent.procedimentos:
+        p = procs_map.get(pid)
+        if not p:
+            continue
+        valor_dom = p.valor_atual * (Decimal("1") + acrescimo_dom)
+        if ent.is_nee:
+            valor_dom *= (Decimal("1") + acrescimo_nee)
+        valor_total = valor_dom * qtd
+        acumulado += valor_total
+
+        calc_txt = f"{_fmt_brl(p.valor_atual)}"
+        if acrescimo_dom > 0:
+            calc_txt += f" x (1+{_fmt_pct(acrescimo_dom)})"
+        if ent.is_nee:
+            calc_txt += f" x (1+{_fmt_pct(acrescimo_nee)})"
+        if qtd > 1:
+            calc_txt += f" x {qtd}"
+
+        cascade_rows.append([
+            Paragraph(p.nome, cell_bold),
+            Paragraph(calc_txt, cell_calc),
+            _fmt_brl_4(valor_total),
+            _fmt_brl_4(acumulado),
+        ])
+
+    # 2b. Hora clínica
+    acumulado += resultado.custo_hora_clinica
+    hora_calc_parts = []
+    for pid, qtd in ent.procedimentos:
+        p = procs_map.get(pid)
+        if not p:
+            continue
+        vh = p.valor_hora_clinica_override or valor_hora_global
+        hora_calc_parts.append(f"{_fmt_brl(vh)}/h x {p.tempo_estimado_min}min")
+    cascade_rows.append([
+        Paragraph("Hora clínica", cell_normal),
+        Paragraph(" + ".join(hora_calc_parts) if len(hora_calc_parts) == 1 else "soma proc.", cell_calc),
+        _fmt_brl_4(resultado.custo_hora_clinica),
+        _fmt_brl_4(acumulado),
+    ])
+
+    # 2c. Material + lab
+    if resultado.custo_materiais_lab > 0:
+        acumulado += resultado.custo_materiais_lab
+        cascade_rows.append([
+            Paragraph("Material + laboratório", cell_normal),
+            Paragraph("custo real (sem acréscimo)", cell_calc),
+            _fmt_brl_4(resultado.custo_materiais_lab),
+            _fmt_brl_4(acumulado),
+        ])
+
+    # 2d. Deslocamento
+    if d:
+        desloc_calc = f"{ent.distancia_km:.0f}km, custo {_fmt_brl_4(d.custo_real)} + margem {_fmt_pct(d.margem_lucro)}"
+    else:
+        desloc_calc = "com margem"
+    acumulado += resultado.custo_deslocamento
+    cascade_rows.append([
+        Paragraph("Deslocamento", cell_normal),
+        Paragraph(desloc_calc, cell_calc),
+        _fmt_brl_4(resultado.custo_deslocamento),
+        _fmt_brl_4(acumulado),
+    ])
+
+    # 2e. Estacionamento
+    if resultado.custo_estacionamento > 0:
+        acumulado += resultado.custo_estacionamento
+        cascade_rows.append([
+            Paragraph("Estacionamento", cell_normal),
+            Paragraph(f"{resultado.tempo_procedimentos_min:.0f}min x tarifa", cell_calc),
+            _fmt_brl_4(resultado.custo_estacionamento),
+            _fmt_brl_4(acumulado),
+        ])
+
+    # 2f. Custos fixos
+    acumulado += resultado.custo_fixos_rateado
+    cascade_rows.append([
+        Paragraph("Custos fixos (rateio)", cell_normal),
+        Paragraph("R$ mensal / atend. estimados", cell_calc),
+        _fmt_brl_4(resultado.custo_fixos_rateado),
+        _fmt_brl_4(acumulado),
+    ])
+
+    # 2g. Retrabalho
+    acumulado += resultado.margem_retrabalho
+    retrabalho_pct = _fmt_pct(cfg.get("retrabalho.margem_percent")) if cfg else "5%"
+    cascade_rows.append([
+        Paragraph(f"Retrabalho ({retrabalho_pct})", cell_normal),
+        Paragraph(f"{retrabalho_pct} x subtotal", cell_calc),
+        _fmt_brl_4(resultado.margem_retrabalho),
+        _fmt_brl_4(acumulado),
+    ])
+
+    # 2h. Impostos
+    acumulado += resultado.valor_impostos
+    cascade_rows.append([
+        Paragraph(f"Impostos ({regime_txt})", cell_normal),
+        Paragraph(f"fórmula inversa {_fmt_pct(resultado.aliquota_aplicada)}", cell_calc),
+        _fmt_brl_4(resultado.valor_impostos),
+        _fmt_brl_4(acumulado),
+    ])
+
+    # Linha final
+    cascade_rows.append([
+        "PREÇO FINAL (Pix)",
+        "",
+        "",
+        _fmt_brl(resultado.subtotal_a_vista),
+    ])
+
+    n_rows = len(cascade_rows)
+    c_tbl = Table(cascade_rows, colWidths=[4.5 * cm, 5.2 * cm, 3.2 * cm, 3.6 * cm])
+    c_style = [
+        ("BACKGROUND", (0, 0), (-1, 0), ACCENT),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("FONTNAME", (0, 1), (-1, -2), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -2), 9),
+        ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+        ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#F4F7FB")]),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D9E2EF")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        # Linha final destacada
+        ("BACKGROUND", (0, n_rows - 1), (-1, n_rows - 1), BG_DARK),
+        ("TEXTCOLOR", (0, n_rows - 1), (-1, n_rows - 1), colors.white),
+        ("FONTNAME", (0, n_rows - 1), (-1, n_rows - 1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, n_rows - 1), (-1, n_rows - 1), 10),
     ]
-    d_tbl = Table(decomp, colWidths=[10 * cm, 6 * cm])
-    d_tbl.setStyle(TableStyle([
+    c_tbl.setStyle(TableStyle(c_style))
+    story.append(c_tbl)
+
+    # ─────────── 2b. LEGENDA ───────────
+    legenda_style = ParagraphStyle(
+        "legenda", fontName="Helvetica", fontSize=7.5, leading=10,
+        textColor=TEXT_MUTED, spaceBefore=2, spaceAfter=1,
+    )
+    legenda_titulo = ParagraphStyle(
+        "legenda_titulo", fontName="Helvetica-Bold", fontSize=8,
+        textColor=BG_DARK, spaceBefore=8, spaceAfter=3,
+    )
+    story.append(Paragraph("Glossário", legenda_titulo))
+
+    glossario = [
+        ("Acréscimo domiciliar",
+         "Percentual adicional sobre o valor do procedimento por ser atendimento em domicílio (padrão CNCC/CRO: 100%)."),
+        ("NEE",
+         "Necessidades Especiais — acréscimo adicional pela complexidade do atendimento a pacientes com necessidades especiais."),
+        ("Hora clínica",
+         "Custo do tempo da profissional dedicado ao procedimento, calculado como (valor da hora × tempo estimado em minutos ÷ 60)."),
+        ("Material + laboratório",
+         "Custo real de materiais odontológicos e serviços de laboratório (ex: próteses). Repassado sem acréscimo."),
+        ("Deslocamento",
+         "Custo da ida e volta até o paciente: combustível + manutenção do veículo + custo de oportunidade do tempo no trânsito, com margem de lucro aplicada."),
+        ("Custos fixos (rateio)",
+         "Despesas mensais fixas (CRO, seguro, contabilidade, depreciação de equipamento, IPVA, seguro veicular, etc.) divididas pelo número estimado de atendimentos no mês."),
+        ("Retrabalho",
+         "Margem de segurança para cobrir eventuais refações ou retornos não previstos."),
+        ("Impostos",
+         "Calculado por fórmula inversa: o valor é embutido no preço para que, após o desconto do imposto, sobre o valor desejado. Fórmula: subtotal ÷ (1 − alíquota)."),
+        ("Fórmula inversa (maquineta)",
+         "Mesmo princípio dos impostos aplicado à taxa do cartão: valor ÷ (1 − taxa), garantindo que o líquido recebido seja o valor correto."),
+    ]
+    for termo, explicacao in glossario:
+        story.append(Paragraph(f"<b>{termo}:</b> {explicacao}", legenda_style))
+
+    # ─────────── 3. RESULTADO LÍQUIDO ───────────
+    story.append(Paragraph("Resultado para a profissional", section))
+
+    receita = resultado.subtotal_a_vista
+
+    # Custos reais (saem do bolso)
+    custo_combustivel = d.custo_combustivel_total if d else Decimal("0")
+    custo_manutencao = d.custo_manutencao_total if d else Decimal("0")
+    custo_mat_lab = resultado.custo_materiais_lab
+    custo_impostos = resultado.valor_impostos
+    custo_fixos = resultado.custo_fixos_rateado
+    custo_estac = resultado.custo_estacionamento
+
+    total_custos = custo_combustivel + custo_manutencao + custo_mat_lab + custo_impostos + custo_fixos + custo_estac
+    lucro = receita - total_custos
+
+    # Tempo total (procedimentos + deslocamento estimado)
+    tempo_proc = resultado.tempo_procedimentos_min
+    if d and d.tempo_waze_min is not None:
+        tempo_desloc = d.tempo_waze_min
+    elif cfg:
+        vel = Decimal(str(cfg.get("tempo.velocidade_media_km_h", 40)))
+        tempo_desloc = (Decimal(str(ent.distancia_km)) / vel) * 60 if vel > 0 else Decimal("0")
+    else:
+        tempo_desloc = Decimal("0")
+    tempo_total = tempo_proc + tempo_desloc
+    lucro_hora = (lucro / (tempo_total / Decimal("60"))) if tempo_total > 0 else Decimal("0")
+    margem_liquida = (lucro / receita * 100) if receita > 0 else Decimal("0")
+
+    profit_rows = [
+        ["", "Valor"],
+        ["Receita (à vista Pix)", _fmt_brl(receita)],
+        ["", ""],
+        [" (-) Impostos", _fmt_brl_4(custo_impostos)],
+        [" (-) Material + laboratório", _fmt_brl_4(custo_mat_lab)],
+        [" (-) Combustível", _fmt_brl_4(custo_combustivel)],
+        [" (-) Manutenção veículo", _fmt_brl_4(custo_manutencao)],
+        [" (-) Custos fixos (rateio mensal)", _fmt_brl_4(custo_fixos)],
+    ]
+    if custo_estac > 0:
+        profit_rows.append([" (-) Estacionamento", _fmt_brl_4(custo_estac)])
+    profit_rows += [
+        ["TOTAL CUSTOS REAIS", _fmt_brl(total_custos)],
+        ["", ""],
+        ["LUCRO LÍQUIDO", _fmt_brl(lucro)],
+        [f"Margem líquida", f"{margem_liquida:.1f}%".replace(".", ",")],
+        ["", ""],
+        [f"Tempo procedimentos", f"{tempo_proc:.0f} min"],
+        [f"Tempo deslocamento (est.)", f"~{tempo_desloc:.0f} min"],
+        [f"Tempo total", f"~{tempo_total:.0f} min"],
+        ["Lucro por hora trabalhada", f"{_fmt_brl(lucro_hora)}/h"],
+    ]
+
+    n_profit = len(profit_rows)
+    p_tbl = Table(profit_rows, colWidths=[10 * cm, 6 * cm])
+
+    # Encontrar índices das linhas especiais
+    idx_receita = 1
+    idx_total_custos = next(i for i, r in enumerate(profit_rows) if r[0] == "TOTAL CUSTOS REAIS")
+    idx_lucro = next(i for i, r in enumerate(profit_rows) if r[0] == "LUCRO LÍQUIDO")
+    idx_lucro_hora = n_profit - 1
+
+    p_style = [
         ("BACKGROUND", (0, 0), (-1, 0), ACCENT),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
@@ -496,31 +663,46 @@ def gerar_pdf_orcamento_interno(
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
         ("FONTSIZE", (0, 1), (-1, -1), 10),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FB")]),
         ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D9E2EF")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FB")]),
         ("LEFTPADDING", (0, 0), (-1, -1), 10),
         ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-        ("TOPPADDING", (0, 0), (-1, -1), 7),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
-    ]))
-    story.append(d_tbl)
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        # Receita
+        ("FONTNAME", (0, idx_receita), (-1, idx_receita), "Helvetica-Bold"),
+        ("BACKGROUND", (0, idx_receita), (-1, idx_receita), colors.HexColor("#E0FFF9")),
+        # Total custos
+        ("FONTNAME", (0, idx_total_custos), (-1, idx_total_custos), "Helvetica-Bold"),
+        ("LINEABOVE", (0, idx_total_custos), (-1, idx_total_custos), 1, BG_DARK),
+        # Lucro
+        ("BACKGROUND", (0, idx_lucro), (-1, idx_lucro), BG_DARK),
+        ("TEXTCOLOR", (0, idx_lucro), (-1, idx_lucro), colors.white),
+        ("FONTNAME", (0, idx_lucro), (-1, idx_lucro), "Helvetica-Bold"),
+        ("FONTSIZE", (0, idx_lucro), (-1, idx_lucro), 12),
+        # Lucro/hora
+        ("FONTNAME", (0, idx_lucro_hora), (-1, idx_lucro_hora), "Helvetica-Bold"),
+        ("TEXTCOLOR", (0, idx_lucro_hora), (-1, idx_lucro_hora), ACCENT),
+    ]
+    p_tbl.setStyle(TableStyle(p_style))
+    story.append(p_tbl)
 
-    # Cenários
-    story.append(Paragraph("Cenários (maquineta)", section))
+    # ─────────── 4. CENÁRIOS DE PAGAMENTO ───────────
+    story.append(Paragraph("Cenários de pagamento (maquineta)", section))
     cen_rows = [["Forma", "Total", "Parcelas"]]
     for c in resultado.cenarios:
         if c.parcela and c.parcelas > 1:
             if getattr(c, "parcela_ultima", None) is not None:
                 parcelas = (
-                    f"{c.parcelas - 1}× {_fmt_brl_preciso(c.parcela)} "
-                    f"+ 1× {_fmt_brl_preciso(c.parcela_ultima)}"
+                    f"{c.parcelas - 1}x {_fmt_brl(c.parcela)} "
+                    f"+ 1x {_fmt_brl(c.parcela_ultima)}"
                 )
             else:
-                parcelas = f"{c.parcelas}× {_fmt_brl_preciso(c.parcela)}"
+                parcelas = f"{c.parcelas}x {_fmt_brl(c.parcela)}"
         else:
             parcelas = "à vista"
-        cen_rows.append([c.forma, _fmt_brl_preciso(c.total), parcelas])
-    cen_tbl = Table(cen_rows, colWidths=[6 * cm, 5 * cm, 5 * cm])
+        cen_rows.append([c.forma, _fmt_brl(c.total), parcelas])
+    cen_tbl = Table(cen_rows, colWidths=[5.5 * cm, 5 * cm, 6 * cm])
     cen_tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), BG_DARK),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -536,6 +718,51 @@ def gerar_pdf_orcamento_interno(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
     story.append(cen_tbl)
+
+    # ─────────── 5. DESLOCAMENTO (detalhe técnico) ───────────
+    if d:
+        story.append(Paragraph("Deslocamento (detalhe)", section))
+        def _cell(v: Decimal, km: Decimal) -> str:
+            return _fmt_brl_4(v) if km > 0 else "—"
+
+        desloc_rows = [
+            ["", "Asfalto", "Terra", "Total"],
+            ["Distância", f"{d.km_asfalto:.1f} km", f"{d.km_terra:.1f} km", f"{d.distancia_km:.1f} km"],
+            ["Combustível", _cell(d.custo_combustivel_asfalto, d.km_asfalto), _cell(d.custo_combustivel_terra, d.km_terra), _fmt_brl_4(d.custo_combustivel_total)],
+            ["Manutenção", _cell(d.custo_manutencao_asfalto, d.km_asfalto), _cell(d.custo_manutencao_terra, d.km_terra), _fmt_brl_4(d.custo_manutencao_total)],
+            ["Custo tempo", _cell(d.custo_tempo_asfalto, d.km_asfalto), _cell(d.custo_tempo_terra, d.km_terra), _fmt_brl_4(d.custo_tempo)],
+            ["Custo real (trecho)", _cell(d.custo_real_asfalto, d.km_asfalto), _cell(d.custo_real_terra, d.km_terra), _fmt_brl_4(d.custo_real)],
+            [f"+ Margem ({_fmt_pct(d.margem_lucro)})", "", "", _fmt_brl_4(d.taxa_apos_margem_sem_nobre - d.custo_real)],
+        ]
+        if d.bairro_nobre:
+            desloc_rows.append([
+                f"+ Bairro nobre ({_fmt_pct(d.acrescimo_bairro_nobre_percent)})",
+                "", "",
+                _fmt_brl_4(d.taxa_ao_paciente - d.taxa_apos_margem_sem_nobre),
+            ])
+        desloc_rows.append(["Taxa ao paciente", "", "", _fmt_brl(d.taxa_ao_paciente)])
+
+        n_desloc = len(desloc_rows)
+        dt = Table(desloc_rows, colWidths=[4.5 * cm, 4 * cm, 4 * cm, 4 * cm])
+        dt.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BG_DARK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#F4F7FB")]),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D9E2EF")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            # Última linha destacada
+            ("FONTNAME", (0, n_desloc - 1), (-1, n_desloc - 1), "Helvetica-Bold"),
+            ("LINEABOVE", (0, n_desloc - 1), (-1, n_desloc - 1), 1, BG_DARK),
+        ]))
+        story.append(dt)
 
     def _draw_version_footer(canvas, doc):
         if not PDF_VERSION:

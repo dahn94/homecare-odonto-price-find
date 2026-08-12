@@ -2,7 +2,7 @@
 
 INSERT OR IGNORE INTO config (chave, valor, tipo, grupo, descricao) VALUES
   -- Veículo
-  ('veiculo.consumo_km_l',             '12.0',  'float', 'veiculo',     'Consumo médio do veículo (km por litro)'),
+  ('veiculo.consumo_km_l',             '12.5',  'float', 'veiculo',     'Consumo médio do veículo (km por litro) — HB20 1.0 gasolina cidade'),
   ('veiculo.preco_combustivel_litro',  '6.10',  'float', 'veiculo',     'Preço do combustível (R$/litro)'),
   ('veiculo.custo_manutencao_km',      '0.15',  'float', 'veiculo',     'Custo de manutenção rateado (R$/km)'),
 
@@ -56,7 +56,10 @@ INSERT OR IGNORE INTO custos_fixos (id, nome, valor_mensal) VALUES
   (3, 'Contabilidade',                     150.00),
   (4, 'Depreciação equipamento portátil',  200.00),
   (5, 'Cursos de especialização',          100.00),
-  (6, 'Manutenção autoclave',               50.00);
+  (6, 'Manutenção autoclave',               50.00),
+  (7, 'IPVA (HB20 — anual rateado)',        87.91),
+  (8, 'Licenciamento veicular (anual rateado)', 4.11),
+  (9, 'Seguro veicular (anual rateado)',   149.62);
 
 -- Zonas de atalho
 INSERT OR IGNORE INTO zonas (id, nome, distancia_ida_volta_km, referencia) VALUES

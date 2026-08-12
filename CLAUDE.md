@@ -151,7 +151,7 @@ CREATE TABLE config (
 
 | chave | valor | tipo | grupo |
 |---|---|---|---|
-| `veiculo.consumo_km_l` | `12.0` | float | veiculo |
+| `veiculo.consumo_km_l` | `12.5` | float | veiculo |  ← HB20 1.0 gasolina cidade
 | `veiculo.preco_combustivel_litro` | `6.10` | float | veiculo |
 | `veiculo.custo_manutencao_km` | `0.15` | float | veiculo |
 | `tempo.valor_hora_clinica` | `150.00` | float | tempo |
@@ -187,7 +187,7 @@ CREATE TABLE custos_fixos (
 );
 ```
 
-Seed: CRO rateado (50), seguro RC (80), contabilidade (150), depreciação equipamento (200), cursos (100), manutenção autoclave (50).
+Seed: CRO rateado (50), seguro RC (80), contabilidade (150), depreciação equipamento portátil (200), cursos de especialização (100), manutenção autoclave (50), IPVA HB20 anual rateado (87,91), licenciamento veicular anual rateado (4,11), seguro veicular anual rateado (149,62).
 
 ### 3. Tabela `zonas` — atendimento por região
 
@@ -364,35 +364,64 @@ class Zona:
 A tela única recebe a entrada mínima e devolve os 4 cenários de pagamento. Não há "item de orçamento" com 6 colunas visíveis — tudo é interno.
 
 ```python
+class Regime(str, Enum):
+    PF = "PF"
+    MEI = "MEI"
+    SIMPLES = "SIMPLES"
+    DEFAULT = "DEFAULT"    # "não aplicar imposto"
+    CUSTOM = "CUSTOM"
+
 @dataclass
 class EntradaPrecificacao:
     procedimentos: list[tuple[int, int]]   # [(procedimento_id, quantidade), ...]
-    distancia_km: float                    # ida + volta — usuária digita direto
-    is_nee: bool                           # checkbox
-    regime_override: str | None            # 'PF' | 'MEI' | 'SIMPLES' | 'DEFAULT' | 'CUSTOM' | None
-    aliquota_override: float | None        # só se regime_override == 'CUSTOM'
+
+    # Deslocamento (ida + volta) — separado por tipo de via
+    km_asfalto: float = 0.0
+    km_terra: float = 0.0                  # fator de manutenção maior, velocidade menor
+    tempo_waze_min: float | None = None    # se informado, substitui o cálculo por velocidade média
+
+    bairro_nobre: bool = False             # acréscimo configurável sobre a taxa de deslocamento
+
+    # Estacionamento: custo proporcional ao tempo total dos procedimentos × tarifa R$/h
+    estacionamento_gratuito: bool = True
+    estacionamento_tarifa_hora: Decimal | None = None  # None = usa config
+
+    is_nee: bool = False
+    regime_override: Regime | None = None
+    aliquota_override: Decimal | None = None           # só usado se regime_override == CUSTOM
+
+    @property
+    def distancia_km(self) -> float:
+        return self.km_asfalto + self.km_terra
 
 @dataclass
 class CenarioPagamento:
-    forma: str           # 'Pix' | 'Cartão 7x' | 'Cartão 10x' | 'Cartão 12x'
-    total: float         # valor final cobrado do paciente
-    parcela: float | None  # None se à vista
+    forma: str                             # 'Pix' | 'Cartão 7x' | 'Cartão 10x' | 'Cartão 12x'
+    total: Decimal                         # valor final cobrado do paciente
+    parcela: Decimal | None = None         # None se à vista
+    parcelas: int = 1
+    parcela_ultima: Decimal | None = None  # ajuste de centavos na última parcela
 
 @dataclass
 class ResultadoPrecificacao:
     entrada: EntradaPrecificacao
 
     # Decomposição interna (não exibida ao usuário, mas guardada no histórico):
-    custo_procedimentos: float    # Σ valor_atual × acréscimo domiciliar (× NEE se aplicável)
-    custo_hora_clinica: float     # Σ hora_clinica × tempo
-    custo_materiais_lab: float    # Σ material + lab
-    custo_deslocamento: float     # cobrado 1x pela visita
-    custo_fixos_rateado: float    # parcela do mês / atendimentos estimados
-    margem_retrabalho: float      # 5% do subtotal
-    valor_impostos: float         # alíquota efetiva sobre o subtotal
-    subtotal_a_vista: float       # base antes da maquineta
+    custo_procedimentos: Decimal    # Σ valor_atual × acréscimo domiciliar (× NEE se aplicável)
+    custo_hora_clinica: Decimal     # Σ hora_clinica × tempo
+    custo_materiais_lab: Decimal    # Σ material + lab (custo real, sem acréscimo)
+    custo_deslocamento: Decimal     # cobrado 1x pela visita (taxa ao paciente, já com margem)
+    custo_estacionamento: Decimal   # proporcional ao tempo total dos procedimentos
+    tempo_procedimentos_min: Decimal
+    custo_fixos_rateado: Decimal    # custos fixos mensais / atendimentos estimados
+    margem_retrabalho: Decimal      # 5% do subtotal
+    valor_impostos: Decimal         # fórmula inversa pela alíquota efetiva
+    subtotal_a_vista: Decimal       # base antes da maquineta (preço Pix final)
 
-    cenarios: list[CenarioPagamento]   # Pix, 7x, 10x, 12x
+    regime_aplicado: Regime = Regime.PF
+    aliquota_aplicada: Decimal = Decimal("0.00")
+
+    cenarios: list[CenarioPagamento] = field(default_factory=list)
 ```
 
 O `precificador.py` é o **único orquestrador**: recebe `EntradaPrecificacao`, lê tudo do banco, e devolve `ResultadoPrecificacao`. Toda a lógica das demais camadas (`deslocamento.py`, `maquineta.py`, etc.) é chamada por ele.
@@ -841,7 +870,14 @@ O app tem **2 telas só**: a principal (Precificador) e a de Configurações (es
 │  • Consulta odontológica            [1] [×]      │
 │  • Restauração resina Classe I      [2] [×]      │
 │                                                  │
-│  Distância (ida + volta): [____] km              │
+│  Deslocamento (ida + volta)                      │
+│   Asfalto: [____] km   Terra: [____] km          │
+│   Tempo Waze (opcional): [____] min              │
+│   □ Bairro nobre                                 │
+│                                                  │
+│  Estacionamento                                  │
+│   ⦿ Gratuito                                     │
+│   ○ Pago: tarifa [____] R$/h                     │
 │                                                  │
 │  □ NEE (+25%)                                    │
 │                                                  │
@@ -871,11 +907,15 @@ O app tem **2 telas só**: a principal (Precificador) e a de Configurações (es
 **Comportamento:**
 
 1. **Busca de procedimentos** com fuzzy search (`thefuzz`). Múltiplos podem ser adicionados, cada um com quantidade.
-2. **Distância em km**: input livre. Se a usuária quiser, há um botão pequeno "📍 zonas pré-cadastradas" que abre um popover com as zonas comuns (Blumenau centro = 10 km, Gaspar = 30 km, etc.) — só atalho, não obrigatório.
-3. **Checkbox NEE** aplica +25% sobre o subtotal de procedimentos (não sobre deslocamento).
-4. **Regime tributário** começa selecionado no default global. Trocar aqui afeta **só este cálculo**, não o config.
-5. **Botão Calcular** chama `precificador.precificar(entrada)` e popula os 4 cenários abaixo.
-6. **Botão Gerar PDF** salva o orçamento em `historico` e abre o PDF.
+2. **Deslocamento**: a usuária informa km de asfalto e km de estrada de terra (ida+volta) separadamente — o trecho de terra usa velocidade menor (`deslocamento.velocidade_media_km_h_estrada_terra`, default 20) e fator de manutenção maior (`deslocamento.fator_manutencao_estrada_terra`, default 1.5), refletindo o desgaste real do veículo. Se os dois forem 0, não cobra deslocamento.
+3. **Tempo Waze (opcional)**: quando informado em minutos (ida+volta), **substitui** o cálculo por velocidade média — o app usa o tempo Waze × hora clínica como custo de tempo, mais preciso quando há trânsito ou trechos longos. Fica vazio na maioria dos atendimentos.
+4. **Bairro nobre**: acrescenta um percentual configurável sobre a taxa de deslocamento (`deslocamento.acrescimo_bairro_nobre_percent`), não sobre o procedimento.
+5. **Estacionamento**: se "pago", o app adiciona `tempo_procedimentos_min × tarifa R$/h` como custo extra — proporcional ao tempo real que o carro fica parado no local. Tarifa vazia usa o default de `config`.
+6. **Atalho de zonas pré-cadastradas**: botão "📍 zonas" que abre um popover com Blumenau centro, Gaspar, Pomerode, etc. — só preenche os campos de km, não é obrigatório.
+7. **Checkbox NEE** aplica +25% sobre o subtotal de procedimentos (não sobre deslocamento nem estacionamento).
+8. **Regime tributário** começa selecionado no default global. Trocar aqui afeta **só este cálculo**, não o config.
+9. **Botão Calcular** chama `precificador.precificar(entrada)` e popula os 4 cenários abaixo.
+10. **Botão Gerar PDF** salva o orçamento em `historico`, gera o PDF do paciente e o PDF interno (sufixo `_interno.pdf`, em `orcamentos/`).
 
 **O que NÃO está na tela principal** (intencionalmente):
 - ❌ Decomposição em 6 colunas (preço unit / hora clín / desloc / etc.) — fica oculto
@@ -971,6 +1011,10 @@ Esta sub-tela merece destaque — é onde a Gabrielle vai passar mais tempo nas 
 
 ## Geração de PDF (reportlab)
 
+Existem **dois PDFs** gerados pelo `pdf_generator.py`, com públicos distintos:
+
+### PDF do paciente — `gerar_pdf_orcamento`
+
 PDF minimalista — pensado pro paciente, não pra Gabrielle. **Não mostra decomposição interna** de custos.
 
 1. **Header**: logo Basis + "Orçamento Odontológico Domiciliar" + data + nº sequencial
@@ -995,6 +1039,22 @@ PDF minimalista — pensado pro paciente, não pra Gabrielle. **Não mostra deco
 5. **Validade**: 30 dias a partir da emissão
 6. **Dados do paciente**: opcionais — só preenchidos se a Gabrielle informar antes de gerar
 7. **Rodapé**: contato da Basis, CRO da profissional, observações
+
+### PDF interno — `gerar_pdf_orcamento_interno`
+
+Log técnico para a própria Gabrielle auditar o cálculo. Estrutura em 5 blocos:
+
+1. **Resumo (inputs)** — cliente, deslocamento (km asfalto + km terra), flags (NEE, bairro nobre, estacionamento pago), regime tributário + alíquota, acréscimo domiciliar.
+2. **Formação do preço — cascata**: tabela com 4 colunas (Etapa · Cálculo · Valor · Acumulado). Cada componente soma ao acumulado em sequência: procedimentos (com acréscimo domiciliar/NEE explícito) → hora clínica → material+lab → deslocamento → estacionamento → custos fixos rateados → retrabalho → impostos → **PREÇO FINAL (Pix)**. Valores intermediários em 4 casas decimais (`_fmt_brl_4`), final em 2.
+3. **Glossário** — explicação curta de cada termo técnico (acréscimo domiciliar, NEE, hora clínica, material+lab, deslocamento, custos fixos, retrabalho, impostos por fórmula inversa, maquineta por fórmula inversa). A Gabrielle lê uma vez e passa a entender o PDF.
+4. **Resultado para a profissional** — receita – custos reais (impostos, material+lab, combustível, manutenção, custos fixos, estacumento) = **lucro líquido**. Também mostra margem líquida %, tempo de procedimentos, tempo de deslocamento estimado, tempo total e **lucro por hora trabalhada**. Esta é a tela que responde "quanto eu ganho de verdade nesse atendimento?".
+5. **Cenários de pagamento (maquineta)** — Pix / 7x / 10x / 12x, mesmo formato do PDF do paciente.
+6. **Deslocamento (detalhe técnico)** — tabela com colunas Asfalto · Terra · Total, separando combustível, manutenção, custo tempo, custo real por trecho, margem aplicada, bairro nobre (se aplicável) e taxa final ao paciente.
+
+Regras dos dois PDFs:
+- Ambos recebem `ConfigStore` para re-calcular o deslocamento e ler os textos de acréscimo/alíquota.
+- O PDF interno **nunca é exibido ao paciente** — salvo em `orcamentos/` com sufixo `_interno.pdf`.
+- Formatação monetária: `_fmt_brl` (2 casas, uso geral), `_fmt_brl_4` (4 casas, cálculos intermediários da cascata e deslocamento), `_fmt_pct` (percentual com 2 casas).
 
 ---
 
